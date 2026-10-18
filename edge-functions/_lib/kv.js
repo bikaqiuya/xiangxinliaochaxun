@@ -16,6 +16,7 @@ function getKV() {
 // ============ 数据标准化（统一版本，兼容所有字段） ============
 // 关键设计：std12729/std21725 等标准字段始终在根级别，
 // 药食同源品种（category=medicinal）也能携带香辛料标准信息
+// 方案B：新增 std12729_code / std21725_code 存储标准编号
 export function normalizeSpice(data) {
   if (!data) return {};
 
@@ -25,17 +26,30 @@ export function normalizeSpice(data) {
     pinyin: data.pinyin || '',
     // 分类：spice=香辛料, seasoning=调味品, medicinal=药食同源
     category: ['spice', 'seasoning', 'medicinal'].includes(data.category) ? data.category : 'spice',
-    latin: data.latin || data.botanical || '',  // 兼容旧字段
+
+    // 拉丁名：优先 latin，兼容旧 botanical
+    latin: data.latin || data.botanical || '',
+    botanical: data.botanical || data.latin || '',   // [新增] 回写旧字段，前端双兼容
+
     family: data.family || '',
     part: String(data.part || '').trim(),
     flavor: data.flavor || '',
     nature: data.nature || '',
     functions: data.functions || '',
     usage: data.usage || '',
-    notes: data.notes || data.note || '',       // 兼容旧字段
-    // 香辛料标准字段（根级别，药食同源品种也保留）
+
+    // 备注：优先 notes，兼容旧 note
+    notes: data.notes || data.note || '',
+    note: data.note || data.notes || '',             // [新增] 回写旧字段，前端双兼容
+
+    // 香辛料标准描述（原有，保留）
     std12729: data.std12729 || '',
     std21725: data.std21725 || '',
+
+    // [新增] 香辛料标准编号（方案B：独立字段，与描述分离）
+    std12729_code: data.std12729_code || '',
+    std21725_code: data.std21725_code || '',
+
     tags: Array.isArray(data.tags) ? data.tags : (data.tags ? [data.tags] : []),
     updatedAt: data.updatedAt || new Date().toISOString(),
   };
