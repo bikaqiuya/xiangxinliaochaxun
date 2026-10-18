@@ -61,3 +61,37 @@ export async function saveSpices(list) {
 
 // 导出常量供其他文件使用
 export { MAX_ITEMS };
+
+// ============ 标准化香辛料数据 ============
+export function normalizeSpice(data) {
+  if (!data) return {};
+
+  const item = {
+    id: data.id || crypto.randomUUID(),
+    name: String(data.name || '').trim(),
+    pinyin: data.pinyin || '',
+    category: data.category || 'spice', // spice / seasoning / medicinal
+    latin: data.latin || '',
+    family: data.family || '',
+    part: data.part || '',
+    flavor: data.flavor || '',
+    nature: data.nature || '',
+    functions: data.functions || '',
+    usage: data.usage || '',
+    notes: data.notes || '',
+    tags: Array.isArray(data.tags) ? data.tags : (data.tags ? [data.tags] : []),
+    updatedAt: data.updatedAt || new Date().toISOString(),
+  };
+
+  // 药食同源额外字段
+  if (item.category === 'medicinal') {
+    item.medicinal = {
+      announcement: data.medicinal?.announcement || data.announcement || '',
+      restriction: data.medicinal?.restriction || data.restriction || '',
+      maxDose: data.medicinal?.maxDose || data.maxDose || '',
+      scope: data.medicinal?.scope || data.scope || '',
+    };
+  }
+
+  return item;
+}
