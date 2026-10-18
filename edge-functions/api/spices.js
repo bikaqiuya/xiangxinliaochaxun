@@ -1,12 +1,13 @@
-import { json, corsHeaders } from '../../_lib/cors.js';
-import { getSpices, saveSpices, normalizeSpice } from '../../_lib/kv.js';
-import { requireAdmin, injectEnv } from '../../_lib/auth.js';
+// edge-functions/api/spices.js
+
+import { json, corsHeaders } from '../_lib/cors.js';
+import { getSpices, saveSpices, normalizeSpice } from '../_lib/kv.js';
+import { requireAdmin, injectEnv } from '../_lib/auth.js';
 
 const MAX_NAME_LEN = 100;
 
-// ============ 从 URL 路径中提取 ID/name ============
+// ============ 从 URL 路径中提取 name ============
 function extractPathParam(context) {
-  // EdgeOne Pages: context.params 或解析 URL
   const url = new URL(context.request.url);
   const pathname = url.pathname; // e.g. /api/spices/xxx 或 /api/spices
   const parts = pathname.split('/').filter(Boolean);
@@ -39,6 +40,7 @@ export async function onRequestOptions() {
 
 // ============ GET 列表（公开） ============
 export async function onRequestGet(context) {
+  injectEnv(context); // ← 加这一行，确保 KV 绑定可用
   const list = await getSpices();
   const url = new URL(context.request.url);
   const cat = url.searchParams.get('category');
@@ -81,11 +83,10 @@ export async function onRequestPut(context) {
 
   const list = await getSpices();
 
-  // 优先从 URL 路径参数定位（admin.html 传的是 name 作为路径参数）
+  // 优先从 URL 路径参数定位
   const pathParam = extractPathParam(context);
   let idx = -1;
   if (pathParam) {
-    // 路径参数可能是 name
     idx = list.findIndex(x => x.name === pathParam);
   }
   // 如果路径参数没找到，用 body 里的 name 定位
