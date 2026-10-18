@@ -1,212 +1,89 @@
-import { json, corsHeaders } from '../_lib/cors.js';
-import { getSpices, saveSpices } from '../_lib/kv.js';
-import { requireAdmin } from '../_lib/auth.js';
+import { json, corsHeaders } from '../../_lib/cors.js';
+import { getSpices, saveSpices, normalizeSpice } from '../../_lib/kv.js';
+import { requireAdmin, injectEnv } from '../../_lib/auth.js';
 
-// ============ 环境变量注入（Makers 关键修复） ============
-function injectEnv(context) {
-  if (context && context.env) {
-    if (context.env.ADMIN_PASSWORD) globalThis.ADMIN_PASSWORD = context.env.ADMIN_PASSWORD;
-    if (context.env.AUTH_SECRET) globalThis.AUTH_SECRET = context.env.AUTH_SECRET;
-    if (context.env.SESSION_SECONDS) globalThis.SESSION_SECONDS = context.env.SESSION_SECONDS;
-    if (context.env.ENVIRONMENT) globalThis.ENVIRONMENT = context.env.ENVIRONMENT;
-  }
-}
+const MAX_NAME_LEN = 100;
 
-// ============ 工具函数 ============
+function cleanItem(body) {
+  const item = normalizeSpice(body);
+  item.name = item.name.slice(0, MAX_NAME_LEN);
+  if (!item.name) return { error: 'name 不能为空' };
 
-// 字符串清理：去除首尾空格，限制长度，防基础 XSS
-function sanitizeString(val, maxLen = 200) {
-  if (val === null || val === undefined) return '';
-  return String(val).trim().slice(0, maxLen);
-}
-
-// 验证必填字段
-function validateSpiceInput(body, isUpdate = false) {
-  const name = sanitizeString(body.name, 100);
-  if (!isUpdate && !name) return { error: 'name 必填', code: 400 };
-  if (name && name.length > 100) return { error: 'name 不能超过 100 字符', code: 400 };
-  
-  return {
-    data: {
-      name,
-      botanical: sanitizeString(body.botanical, 300),
-      part: sanitizeString(body.part, 100),
-      std12729: sanitizeString(body.std12729 || '表1收录', 100),
-      std21725: sanitizeString(body.std21725, 100)
+  // 药食同源必须填公告依据
+  if (item.category === 'medicinal') {
+    if (!item.medicinal.announcement) {
+      return { error: `药食同源品种「${item.name}」必须填写公告依据` };
     }
-  };
+  }
+  return { item };
 }
 
-// ============ 路由处理 ============
-
-// OPTIONS - 预检请求
 export async function onRequestOptions() {
-  return new Response(null, {
-    headers: {
-      ...corsHeaders(),
-      'Access-Control-Max-Age': '86400',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-    }
-  });
+  return new Response(null, { headers: corsHeaders() });
 }
 
-// GET - 公开查询（不需要鉴权，不需要 injectEnv）
+// GET 列表（公开，供前台展示）
 export async function onRequestGet(context) {
-  const { request } = context;
-  const url = new URL(request.url);
-  let q = (url.searchParams.get('q') || '').trim().toLowerCase();
-  
-  // 限制查询词长度，防止超长正则/字符串匹配消耗
-  if (q.length > 100) q = q.slice(0, 100);
-
-  try {
-    let list = await getSpices();
-
-    if (q) {
-      list = list.filter(x =>
-        (x.name || '').toLowerCase().includes(q) ||
-        (x.botanical || '').toLowerCase().includes(q) ||
-        (x.part || '').toLowerCase().includes(q)
-      );
-    }
-    
-    return json(list, 200, corsHeaders());
-  } catch (err) {
-    console.error('GET /api/spices error:', err);
-    return json({ error: '数据读取失败' }, 500, corsHeaders());
-  }
+  const list = await getSpices();
+  const url = new URL(context.request.url);
+  const cat = url.searchParams.get('category');
+  const filtered = cat ? list.filter(x => x.category === cat) : list;
+  return json(filtered);
 }
 
-// POST - 新增（需登录）
+// POST 新增
 export async function onRequestPost(context) {
-  // ★ 注入环境变量
   injectEnv(context);
+  if (!(await requireAdmin(context.request))) return json({ error: '需要登录' }, 401);
 
-  if (!(await requireAdmin(context.request))) {
-    return json({ error: '需要登录' }, 401, corsHeaders());
-  }
-  
-  const { request } = context;
   let body;
-  try { 
-    body = await request.json(); 
-  } catch (_) { 
-    return json({ error: 'JSON 无效' }, 400, corsHeaders()); 
+  try { body = await context.request.json(); }
+  catch { return json({ error: 'JSON 无效' }, 400); }
+
+  const { item, error } = cleanItem(body);
+  if (error) return json({ error }, 400);
+
+  const list = await getSpices();
+  if (list.some(x => x.name === item.name)) {
+    return json({ error: `已存在同名品种：${item.name}` }, 409);
   }
-
-  // 校验输入
-  const validated = validateSpiceInput(body, false);
-  if (validated.error) return json({ error: validated.error }, validated.code, corsHeaders());
-  const { name, botanical, part, std12729, std21725 } = validated.data;
-
-  try {
-    const list = await getSpices();
-    
-    // 检查重名
-    if (list.some(x => x.name === name)) {
-      return json({ error: `已存在同名香辛料「${name}」` }, 409, corsHeaders());
-    }
-
-    list.push({ name, botanical, part, std12729, std21725 });
-    await saveSpices(list);
-    
-    return json({ ok: true, count: list.length, name }, 201, corsHeaders());
-  } catch (err) {
-    console.error('POST /api/spices error:', err);
-    return json({ error: '保存失败，请重试' }, 500, corsHeaders());
-  }
+  list.push(item);
+  await saveSpices(list);
+  return json({ ok: true, count: list.length });
 }
 
-// PUT - 修改（需登录）
+// PUT 更新（按 name 定位）
 export async function onRequestPut(context) {
-  // ★ 注入环境变量
   injectEnv(context);
-
-  if (!(await requireAdmin(context.request))) {
-    return json({ error: '需要登录' }, 401, corsHeaders());
-  }
-  
-  const { request } = context;
-  const url = new URL(request.url);
-  const originalName = sanitizeString(url.searchParams.get('name'), 100);
-  if (!originalName) {
-    return json({ error: 'name 参数必填（URL 中 ?name=原名）' }, 400, corsHeaders());
-  }
+  if (!(await requireAdmin(context.request))) return json({ error: '需要登录' }, 401);
 
   let body;
-  try { 
-    body = await request.json(); 
-  } catch (_) { 
-    return json({ error: 'JSON 无效' }, 400, corsHeaders()); 
-  }
+  try { body = await context.request.json(); }
+  catch { return json({ error: 'JSON 无效' }, 400); }
 
-  // 校验输入（允许 name 为空表示不改名）
-  const validated = validateSpiceInput(body, true);
-  if (validated.error) return json({ error: validated.error }, validated.code, corsHeaders());
-  const { name: newName, botanical, part, std12729, std21725 } = validated.data;
+  const { item, error } = cleanItem(body);
+  if (error) return json({ error }, 400);
 
-  try {
-    const list = await getSpices();
-    const idx = list.findIndex(x => x.name === originalName);
-    if (idx < 0) {
-      return json({ error: '未找到该香辛料' }, 404, corsHeaders());
-    }
-
-    // 如果改了名字，检查新名字是否与其他条目冲突
-    if (newName && newName !== originalName) {
-      const nameExists = list.some((x, i) => x.name === newName && i !== idx);
-      if (nameExists) {
-        return json({ error: `已存在同名香辛料「${newName}」，无法重命名` }, 409, corsHeaders());
-      }
-    }
-
-    // 更新数据
-    const finalName = newName || originalName;
-    list[idx] = {
-      name: finalName,
-      botanical: botanical || list[idx].botanical,
-      part: part || list[idx].part,
-      std12729: std12729 || list[idx].std12729,
-      std21725: std21725 || list[idx].std21725
-    };
-
-    await saveSpices(list);
-    return json({ ok: true, name: finalName }, 200, corsHeaders());
-  } catch (err) {
-    console.error('PUT /api/spices error:', err);
-    return json({ error: '更新失败，请重试' }, 500, corsHeaders());
-  }
+  const list = await getSpices();
+  const idx = list.findIndex(x => x.name === item.name);
+  if (idx === -1) return json({ error: '未找到该品种' }, 404);
+  list[idx] = item;
+  await saveSpices(list);
+  return json({ ok: true });
 }
 
-// DELETE - 删除（需登录）
+// DELETE 删除
 export async function onRequestDelete(context) {
-  // ★ 注入环境变量
   injectEnv(context);
+  if (!(await requireAdmin(context.request))) return json({ error: '需要登录' }, 401);
 
-  if (!(await requireAdmin(context.request))) {
-    return json({ error: '需要登录' }, 401, corsHeaders());
-  }
-  
-  const { request } = context;
-  const url = new URL(request.url);
-  const name = sanitizeString(url.searchParams.get('name'), 100);
-  if (!name) {
-    return json({ error: 'name 参数必填（URL 中 ?name=要删除的名称）' }, 400, corsHeaders());
-  }
+  const url = new URL(context.request.url);
+  const name = url.searchParams.get('name');
+  if (!name) return json({ error: '缺少 name 参数' }, 400);
 
-  try {
-    const list = await getSpices();
-    const originalLength = list.length;
-    const next = list.filter(x => x.name !== name);
-    
-    if (next.length === originalLength) {
-      return json({ error: '未找到该香辛料' }, 404, corsHeaders());
-    }
-    
-    await saveSpices(next);
-    return json({ ok: true, count: next.length, deleted: originalLength - next.length }, 200, corsHeaders());
-  } catch (err) {
-    console.error('DELETE /api/spices error:', err);
-    return json({ error: '删除失败，请重试' }, 500, corsHeaders());
-  }
+  const list = await getSpices();
+  const next = list.filter(x => x.name !== name);
+  if (next.length === list.length) return json({ error: '未找到该品种' }, 404);
+  await saveSpices(next);
+  return json({ ok: true, count: next.length });
 }
