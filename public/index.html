@@ -261,6 +261,20 @@
   }
   .notice-banner strong { color: var(--primary); }
 
+  /* 标准编号标签 */
+  .std-code {
+    background: #f1f5f9;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--text);
+  }
+  .std-desc {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
   @media (max-width: 640px) {
     .grid { grid-template-columns: 1fr; }
     header h1 { font-size: 20px; }
@@ -357,13 +371,13 @@ function render() {
       if (cat === 'spice' && !['spice', 'seasoning'].includes(item.category)) return false;
       else if (cat !== 'spice' && item.category !== cat) return false;
     }
-    // 关键词搜索（修正字段名：latin 替代 botanical，notes 替代 note）
+    // 关键词搜索（字段名：latin 替代 botanical，notes 替代 note）
     if (kw) {
       const haystack = [
         item.name,
-        item.latin || '',
+        item.latin || item.botanical || '',
         item.part || '',
-        item.notes || '',
+        item.notes || item.note || '',
         item.medicinal?.alias || ''
       ].join(' ').toLowerCase();
       if (!haystack.includes(kw)) return false;
@@ -393,9 +407,19 @@ function render() {
       const m = item.medicinal || {};
       const isMed = item.category === 'medicinal';
 
-      // 标准字段：始终生成（药食同源品种也能携带香辛料标准）
-      const stdParts = [item.std12729, item.std21725].filter(Boolean);
-      const stdHtml = stdParts.length ? stdParts.map(s => `<span style="background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:11px;">${s}</span>`).join(' ') : '';
+      // ===== 方案B：标准显示（优先编号，括号跟描述） =====
+      const stdCodeParts = [item.std12729_code, item.std21725_code].filter(Boolean);
+      const stdDescParts = [item.std12729, item.std21725].filter(Boolean);
+      let stdHtml = '';
+      if (stdCodeParts.length) {
+        stdHtml = stdCodeParts.map(s => `<span class="std-code">${s}</span>`).join(' ');
+        if (stdDescParts.length) {
+          stdHtml += ` <span class="std-desc">(${stdDescParts.join(' / ')})</span>`;
+        }
+      } else if (stdDescParts.length) {
+        // 兜底：没有编号时只显示描述
+        stdHtml = stdDescParts.map(s => `<span class="std-code">${s}</span>`).join(' ');
+      }
 
       return `<div class="card">
         <div class="card-header">
