@@ -99,7 +99,7 @@
         <input id="f_name">
       </label>
       <label class="full">拉丁学名
-        <input id="f_botanical">
+        <input id="f_botanical" placeholder="如：Amomum tsao-ko">
       </label>
       <label>使用部位
         <input id="f_part">
@@ -108,12 +108,12 @@
         <input id="f_note">
       </label>
 
-      <!-- 香辛料标准 -->
+      <!-- 香辛料标准（始终可见，药食同源品种也可填写） -->
       <label>GB/T 12729 标准
-        <input id="f_std12729">
+        <input id="f_std12729" placeholder="如：GB/T 12729.1-2008">
       </label>
       <label>GB/T 21725 标准
-        <input id="f_std21725">
+        <input id="f_std21725" placeholder="如：GB/T 21725-2008">
       </label>
 
       <!-- 药食同源字段 -->
@@ -177,7 +177,6 @@ async function api(path, opts = {}) {
 async function checkLogin() {
   try {
     const me = await api('/auth/me');
-    // 兼容多种返回格式：{ ok:true } / { authenticated:true } / { success:true }
     if (me && (me.ok || me.authenticated || me.success)) {
       $('#loginBox').style.display = 'none';
       $('#app').style.display = 'block';
@@ -205,27 +204,22 @@ $('#btnLogin').onclick = async () => {
     });
     const data = await r.json();
     
-    // 判断登录成功：HTTP 200 + data.ok === true
     if (!r.ok || !data.ok) {
       throw new Error(data.error || data.message || '密码错误');
     }
     
-    // 登录成功，直接切换页面
     $('#pwd').value = '';
     $('#loginMsg').textContent = '';
     $('#loginBox').style.display = 'none';
     $('#app').style.display = 'block';
     $('#userState').textContent = '已登录';
     showToast('登录成功', 'success');
-    
-    // 加载数据
     load();
   } catch (e) {
     $('#loginMsg').textContent = e.message;
   }
 };
 
-// 支持回车键登录
 $('#pwd').addEventListener('keypress', (e) => {
   if (e.key === 'Enter') $('#btnLogin').click();
 });
@@ -258,7 +252,8 @@ function render() {
   const cat = $('#filterCat').value;
   const rows = CACHE.filter(x => {
     if (cat && x.category !== cat) return false;
-    if (kw && !(x.name + (x.botanical || '')).toLowerCase().includes(kw)) return false;
+    // 修复：搜索时用 latin（兼容旧 botanical）
+    if (kw && !(x.name + (x.latin || x.botanical || '')).toLowerCase().includes(kw)) return false;
     return true;
   });
 
@@ -270,14 +265,15 @@ function render() {
     } else {
       stdOrAnn = [x.std12729, x.std21725].filter(Boolean).join(' / ') || '-';
     }
+    // 修复：显示用 latin（兼容旧 botanical），备注用 notes（兼容旧 note）
     return `<tr data-cat="${x.category}">
       <td>${catBadge(x.category)}</td>
       <td><strong>${x.name}</strong>${m.alias ? `<br><span class="muted">${m.alias}</span>` : ''}</td>
-      <td><span class="muted">${x.botanical || '-'}</span></td>
+      <td><span class="muted">${x.latin || x.botanical || '-'}</span></td>
       <td>${x.part || '-'}</td>
       <td>${stdOrAnn}</td>
       <td>${m.safetyNote ? '⚠️ ' + m.safetyNote : '-'}</td>
-      <td>${x.note || '-'}</td>
+      <td>${x.notes || x.note || '-'}</td>
       <td>
         <button class="ghost" onclick="editItem('${encodeURIComponent(x.name)}')">编辑</button>
         <button class="ghost" onclick="delItem('${encodeURIComponent(x.name)}')">删</button>
@@ -311,9 +307,11 @@ function openModal(item = null) {
   $('#f_category').value = item?.category || 'spice';
   $('#f_name').value = item?.name || '';
   $('#f_name').disabled = isEdit;
-  $('#f_botanical').value = item?.botanical || '';
+  // 修复：回显用 latin（兼容旧 botanical）
+  $('#f_botanical').value = item?.latin || item?.botanical || '';
   $('#f_part').value = item?.part || '';
-  $('#f_note').value = item?.note || '';
+  // 修复：回显用 notes（兼容旧 note）
+  $('#f_note').value = item?.notes || item?.note || '';
   $('#f_std12729').value = item?.std12729 || '';
   $('#f_std21725').value = item?.std21725 || '';
 
@@ -342,12 +340,13 @@ $('#btnAdd').onclick = () => openModal(null);
 $('#btnCancel').onclick = () => $('#editModal').classList.remove('show');
 
 async function save() {
+  // 修复：提交 latin/notes 与 kv.js 输出字段对齐（normalizeSpice 两种都认）
   const payload = {
     name: $('#f_name').value.trim(),
     category: $('#f_category').value,
-    botanical: $('#f_botanical').value.trim(),
+    latin: $('#f_botanical').value.trim(),       // 表单 ID 保持 f_botanical，提交为 latin
     part: $('#f_part').value.trim(),
-    note: $('#f_note').value.trim(),
+    notes: $('#f_note').value.trim(),             // 提交为 notes
     std12729: $('#f_std12729').value.trim(),
     std21725: $('#f_std21725').value.trim(),
     medicinal: {
@@ -421,7 +420,7 @@ $('#fileInput').onchange = async (e) => {
   e.target.value = '';
 };
 
-// 启动：先检查登录态，已登录直接进后台
+// 启动
 (async () => {
   const ok = await checkLogin();
   if (ok) load();
