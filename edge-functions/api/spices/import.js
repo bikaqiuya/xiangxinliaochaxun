@@ -1,74 +1,77 @@
+// edge-functions/api/spices/import.js
+
 import { json, corsHeaders } from '../../_lib/cors.js';
 import { getSpices, saveSpices, normalizeSpice } from '../../_lib/kv.js';
 import { requireAdmin, injectEnv } from '../../_lib/auth.js';
 
-const MAX_ITEMS = 500;
-
+// ============ OPTIONS 预检 ============
 export async function onRequestOptions() {
   return new Response(null, { headers: corsHeaders() });
 }
 
+// ============ POST 导入（合并模式） ============
 export async function onRequestPost(context) {
   injectEnv(context);
   if (!(await requireAdmin(context.request))) return json({ error: '需要登录' }, 401);
 
   let body;
-  try { body = await context.request.json(); }
-  catch { return json({ error: 'JSON 无效' }, 400); }
-
-  if (!Array.isArray(body)) return json({ error: '请求体必须为数组' }, 400);
-  if (body.length === 0) return json({ error: '空数组被阻止（会清空数据）' }, 400);
-  if (body.length > MAX_ITEMS) return json({ error: `单次最多 ${MAX_ITEMS} 条` }, 400);
-
-  // 读取现有数据
-  const existing = await getSpices();
-  const existingNames = new Set(existing.map(x => x.name));
-
-  const seen = new Map();
-  const clean = [];
-  let skipped = 0;
-  let updated = 0;
-
-  for (let i = 0; i < body.length; i++) {
-    const { item, error } = (() => {
-      const it = normalizeSpice(body[i]);
-      if (!it.name) return { error: 'miss_name' };
-      // 安全访问 medicinal（非药食同源可能没有该字段）
-      if (it.category === 'medicinal' && (!it.medicinal || !it.medicinal.announcement)) {
-        return { error: `药食同源「${it.name}」缺少公告依据` };
-      }
-      return { item: it };
-    })();
-
-    if (error === 'miss_name') { skipped++; continue; }
-    if (error) return json({ error: `第${i + 1}条：${error}` }, 400);
-
-    if (seen.has(item.name)) {
-      return json({ error: `重复名称：「${item.name}」`, code: 'DUPLICATE' }, 400);
-    }
-    seen.set(item.name, true);
-
-    // 统计更新数量
-    if (existingNames.has(item.name)) {
-      updated++;
-    }
-
-    clean.push(item);
+  try {
+    body = await context.request.json();
+  } catch {
+    return json({ error: 'JSON 无效' }, 400);
   }
 
-  if (clean.length === 0) return json({ error: '清洗后无有效数据' }, 400);
+  if (!Array.isArray(body)) {
+    return json({ error: '导入数据必须为数组' }, 400);
+  }
 
-  // 合并：过滤掉被更新的旧记录，追加新/更新后的记录
-  const filtered = existing.filter(x => !clean.some(c => c.name === x.name));
-  const merged = [...filtered, ...clean];
+  if (body.length === 0) {
+    return json({ error: '导入数据为空' }, 400);
+  }
 
-  await saveSpices(merged);
+  // 1. 读取现有数据
+  const existing = await getSpices();
+
+  // 2. 对导入数组内部去重（同名只保留最后一条）
+  const importMap = new Map();
+  for (const raw of body) {
+    const item = normalizeSpice(raw);
+    if (!item.name) continue; // 跳过无名称的脏数据
+    importMap.set(item.name, item);
+  }
+
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  // 3. 逐条合并
+  for (const item of importMap.values()) {
+    const idx = existing.findIndex(x => x.name === item.name);
+    if (idx !== -1) {
+      // 已存在 → 更新（保留原有 id）
+      item.id = existing[idx].id || item.id;
+      existing[idx] = item;
+      updated++;
+    } else {
+      // 不存在 → 新增
+      existing.push(item);
+      added++;
+    }
+  }
+
+  // 4. 写回 KV
+  try {
+    await saveSpices(existing);
+  } catch (e) {
+    return json({ error: '写入失败：' + e.message }, 500);
+  }
+
   return json({
     ok: true,
-    added: clean.length - updated,
+    message: `导入完成：新增 ${added} 条，更新 ${updated} 条，跳过 ${skipped} 条`,
+    added,
     updated,
     skipped,
-    total: merged.length,
-    message: `成功导入 ${clean.length} 条（新增 ${clean.length - updated}，更新 ${updated}）${skipped ? `，跳过 ${skipped} 条` : ''}`
+    total: existing.length
   });
 }
