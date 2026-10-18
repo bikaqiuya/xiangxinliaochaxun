@@ -23,13 +23,14 @@
   .muted { color:var(--muted); }
   .modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:flex-start; justify-content:center; padding:40px 12px; overflow:auto; z-index:100; }
   .modal.show { display:flex; }
-  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; width:100%; max-width:640px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; width:100%; max-width:680px; }
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .grid label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
   .full { grid-column:1 / -1; }
   pre { background:#0b1220; padding:10px; border-radius:8px; max-height:240px; overflow:auto; }
   #loginBox { max-width:320px; margin:12vh auto; }
   .toast { position:fixed; top:20px; right:20px; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 16px; z-index:200; display:none; }
+  .std-code { font-family:'SF Mono','Fira Code',monospace; font-size:11px; }
 </style>
 </head>
 <body>
@@ -108,12 +109,20 @@
         <input id="f_note">
       </label>
 
-      <!-- 香辛料标准（始终可见，药食同源品种也可填写） -->
-      <label>GB/T 12729 标准
-        <input id="f_std12729" placeholder="如：GB/T 12729.1-2008">
+      <!-- 香辛料标准描述（原有，始终可见） -->
+      <label>GB/T 12729 标准描述
+        <input id="f_std12729" placeholder="如：表1收录">
       </label>
-      <label>GB/T 21725 标准
-        <input id="f_std21725" placeholder="如：GB/T 21725-2008">
+      <label>GB/T 21725 标准描述
+        <input id="f_std21725" placeholder="如：辛辣型 (P19)">
+      </label>
+
+      <!-- 香辛料标准编号（方案B新增，始终可见） -->
+      <label>GB/T 12729 标准编号
+        <input id="f_std12729_code" placeholder="如：GB/T 12729.1-2008">
+      </label>
+      <label>GB/T 21725 标准编号
+        <input id="f_std21725_code" placeholder="如：GB/T 21725-2008">
       </label>
 
       <!-- 药食同源字段 -->
@@ -252,7 +261,6 @@ function render() {
   const cat = $('#filterCat').value;
   const rows = CACHE.filter(x => {
     if (cat && x.category !== cat) return false;
-    // 修复：搜索时用 latin（兼容旧 botanical）
     if (kw && !(x.name + (x.latin || x.botanical || '')).toLowerCase().includes(kw)) return false;
     return true;
   });
@@ -263,9 +271,20 @@ function render() {
     if (x.category === 'medicinal') {
       stdOrAnn = `${m.announcement || '-'} ${m.isPilot ? '<span class="badge warn">试点</span>' : ''}`;
     } else {
-      stdOrAnn = [x.std12729, x.std21725].filter(Boolean).join(' / ') || '-';
+      // 优先显示标准编号，括号跟描述
+      const codeParts = [x.std12729_code, x.std21725_code].filter(Boolean);
+      const descParts = [x.std12729, x.std21725].filter(Boolean);
+      if (codeParts.length) {
+        stdOrAnn = codeParts.map(s => `<span class="std-code">${s}</span>`).join(' ');
+        if (descParts.length) {
+          stdOrAnn += ` <span class="muted" style="font-size:11px;">(${descParts.join(' / ')})</span>`;
+        }
+      } else if (descParts.length) {
+        stdOrAnn = descParts.map(s => `<span class="std-code">${s}</span>`).join(' ');
+      } else {
+        stdOrAnn = '-';
+      }
     }
-    // 修复：显示用 latin（兼容旧 botanical），备注用 notes（兼容旧 note）
     return `<tr data-cat="${x.category}">
       <td>${catBadge(x.category)}</td>
       <td><strong>${x.name}</strong>${m.alias ? `<br><span class="muted">${m.alias}</span>` : ''}</td>
@@ -307,13 +326,14 @@ function openModal(item = null) {
   $('#f_category').value = item?.category || 'spice';
   $('#f_name').value = item?.name || '';
   $('#f_name').disabled = isEdit;
-  // 修复：回显用 latin（兼容旧 botanical）
   $('#f_botanical').value = item?.latin || item?.botanical || '';
   $('#f_part').value = item?.part || '';
-  // 修复：回显用 notes（兼容旧 note）
   $('#f_note').value = item?.notes || item?.note || '';
   $('#f_std12729').value = item?.std12729 || '';
   $('#f_std21725').value = item?.std21725 || '';
+  // 新增：标准编号回显
+  $('#f_std12729_code').value = item?.std12729_code || '';
+  $('#f_std21725_code').value = item?.std21725_code || '';
 
   const m = item?.medicinal || {};
   $('#m_alias').value = m.alias || '';
@@ -340,15 +360,17 @@ $('#btnAdd').onclick = () => openModal(null);
 $('#btnCancel').onclick = () => $('#editModal').classList.remove('show');
 
 async function save() {
-  // 修复：提交 latin/notes 与 kv.js 输出字段对齐（normalizeSpice 两种都认）
   const payload = {
     name: $('#f_name').value.trim(),
     category: $('#f_category').value,
-    latin: $('#f_botanical').value.trim(),       // 表单 ID 保持 f_botanical，提交为 latin
+    latin: $('#f_botanical').value.trim(),
     part: $('#f_part').value.trim(),
-    notes: $('#f_note').value.trim(),             // 提交为 notes
+    notes: $('#f_note').value.trim(),
     std12729: $('#f_std12729').value.trim(),
     std21725: $('#f_std21725').value.trim(),
+    // 新增：标准编号
+    std12729_code: $('#f_std12729_code').value.trim(),
+    std21725_code: $('#f_std21725_code').value.trim(),
     medicinal: {
       alias: $('#m_alias').value.trim(),
       officialName: $('#m_officialName').value.trim(),
