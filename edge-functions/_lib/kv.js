@@ -14,6 +14,8 @@ function getKV() {
 }
 
 // ============ 数据标准化（统一版本，兼容所有字段） ============
+// 关键设计：std12729/std21725 等标准字段始终在根级别，
+// 药食同源品种（category=medicinal）也能携带香辛料标准信息
 export function normalizeSpice(data) {
   if (!data) return {};
 
@@ -21,6 +23,7 @@ export function normalizeSpice(data) {
     id: data.id || crypto.randomUUID(),
     name: String(data.name || '').trim(),
     pinyin: data.pinyin || '',
+    // 分类：spice=香辛料, seasoning=调味品, medicinal=药食同源
     category: ['spice', 'seasoning', 'medicinal'].includes(data.category) ? data.category : 'spice',
     latin: data.latin || data.botanical || '',  // 兼容旧字段
     family: data.family || '',
@@ -30,13 +33,14 @@ export function normalizeSpice(data) {
     functions: data.functions || '',
     usage: data.usage || '',
     notes: data.notes || data.note || '',       // 兼容旧字段
+    // 香辛料标准字段（根级别，药食同源品种也保留）
     std12729: data.std12729 || '',
     std21725: data.std21725 || '',
     tags: Array.isArray(data.tags) ? data.tags : (data.tags ? [data.tags] : []),
     updatedAt: data.updatedAt || new Date().toISOString(),
   };
 
-  // 药食同源额外字段（兼容新旧两种数据格式）
+  // 药食同源额外字段（子对象，仅 medicinal 分类构建）
   if (item.category === 'medicinal') {
     item.medicinal = {
       alias: data.medicinal?.alias || '',
