@@ -106,3 +106,10 @@ export function getCookie(request, name) {
   const match = cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
   return match ? decodeURIComponent(match[1]) : null;
 }
+
+// ============ 清除 Cookie（logout.js 依赖） ============
+export function clearCookieHeaders() {
+  const isProd = globalThis.ENVIRONMENT === 'production';
+  const cookie = `admin_token=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${isProd ? '; Secure' : ''}`;
+  return { 'Set-Cookie': cookie };
+}
