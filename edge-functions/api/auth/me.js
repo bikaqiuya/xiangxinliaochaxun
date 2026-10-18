@@ -12,10 +12,10 @@ function injectEnv(context) {
 }
 
 export async function onRequestGet(context) {
-  // ★ 关键：把 Makers env 注入到全局
+  // 1. 注入 Makers 环境变量
   injectEnv(context);
 
-  // 构建响应头：CORS + 防缓存
+  // 2. 构建响应头：CORS + 严格防缓存
   const headers = {
     ...corsHeaders(),
     'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
@@ -24,20 +24,24 @@ export async function onRequestGet(context) {
   };
 
   try {
+    // 3. 校验登录状态
     const ok = await requireAdmin(context.request);
 
     if (ok) {
-      // 已登录：返回认证状态
-      return json({ authenticated: true }, 200, headers);
+      // 已登录：返回认证状态及用户名
+      return json({ 
+        authenticated: true,
+        username: '管理员'
+      }, 200, headers);
     } else {
-      // 未登录或会话无效：返回 401 + 明确提示
+      // 未登录或会话无效：返回 401
       return json({ 
         authenticated: false, 
         error: '未登录或会话已过期' 
       }, 401, headers);
     }
   } catch (err) {
-    // 兜底：鉴权逻辑本身出错
+    // 兜底错误处理
     console.error('Auth me error:', err);
     return json({ 
       authenticated: false, 
