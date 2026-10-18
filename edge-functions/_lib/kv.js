@@ -1,68 +1,19 @@
 // edge-functions/_lib/kv.js
-const KV = SPICE_KV; // 已根据控制台绑定名修改
 
 const KEY = 'spices';
 const MAX_ITEMS = 1000;
 
-// 数据标准化（兼容老数据与药食同源新字段）
-function normalizeSpice(item) {
-  const category = ['spice', 'medicinal'].includes(item.category) ? item.category : 'spice';
-  
-  const base = {
-    name: String(item.name || '').trim(),
-    category,
-    botanical: String(item.botanical || '').trim(),
-    part: String(item.part || '').trim(),
-    note: String(item.note || '').trim(),
-    std12729: String(item.std12729 || '').trim(),
-    std21725: String(item.std21725 || '').trim()
-  };
-
-  // 如果是药食同源分类，补充 medicinal 字段
-  if (category === 'medicinal') {
-    base.medicinal = {
-      alias: String(item.medicinal?.alias || ''),
-      officialName: String(item.medicinal?.officialName || base.name),
-      announcement: String(item.medicinal?.announcement || ''),
-      announcementNo: String(item.medicinal?.announcementNo || ''),
-      announceDate: String(item.medicinal?.announceDate || ''),
-      basis: String(item.medicinal?.basis || '按照传统既是食品又是中药材的物质目录'),
-      isPilot: Boolean(item.medicinal?.isPilot),
-      pilotRegions: String(item.medicinal?.pilotRegions || ''),
-      usageLimit: String(item.medicinal?.usageLimit || '按传统方式适量食用'),
-      safetyNote: String(item.medicinal?.safetyNote || '')
-    };
+// ============ 延迟获取 KV 绑定（必须在 injectEnv 之后调用） ============
+function getKV() {
+  const kv = globalThis.SPICE_KV;
+  if (!kv) {
+    console.error('[kv] SPICE_KV not found! Make sure injectEnv(context) is called before any KV operation.');
+    throw new Error('SPICE_KV 未初始化，请检查环境变量配置');
   }
-
-  return base;
+  return kv;
 }
 
-// 读取香辛料数据
-export async function getSpices() {
-  const raw = await KV.get(KEY);
-  if (!raw) return [];
-  try {
-    const list = JSON.parse(raw);
-    return Array.isArray(list) ? list.map(normalizeSpice) : [];
-  } catch (e) {
-    console.error('KV JSON parse error:', e);
-    return [];
-  }
-}
-
-// 写入香辛料数据
-export async function saveSpices(list) {
-  if (!Array.isArray(list)) throw new Error('数据必须为数组');
-  if (list.length > MAX_ITEMS) throw new Error(`超出最大限制 ${MAX_ITEMS}`);
-  
-  const cleaned = list.map(normalizeSpice);
-  await KV.put(KEY, JSON.stringify(cleaned));
-}
-
-// 导出常量供其他文件使用
-export { MAX_ITEMS };
-
-// ============ 标准化香辛料数据 ============
+// ============ 数据标准化（统一版本，兼容所有字段） ============
 export function normalizeSpice(data) {
   if (!data) return {};
 
@@ -70,28 +21,65 @@ export function normalizeSpice(data) {
     id: data.id || crypto.randomUUID(),
     name: String(data.name || '').trim(),
     pinyin: data.pinyin || '',
-    category: data.category || 'spice', // spice / seasoning / medicinal
-    latin: data.latin || '',
+    category: ['spice', 'seasoning', 'medicinal'].includes(data.category) ? data.category : 'spice',
+    latin: data.latin || data.botanical || '',  // 兼容旧字段
     family: data.family || '',
-    part: data.part || '',
+    part: String(data.part || '').trim(),
     flavor: data.flavor || '',
     nature: data.nature || '',
     functions: data.functions || '',
     usage: data.usage || '',
-    notes: data.notes || '',
+    notes: data.notes || data.note || '',       // 兼容旧字段
+    std12729: data.std12729 || '',
+    std21725: data.std21725 || '',
     tags: Array.isArray(data.tags) ? data.tags : (data.tags ? [data.tags] : []),
     updatedAt: data.updatedAt || new Date().toISOString(),
   };
 
-  // 药食同源额外字段
+  // 药食同源额外字段（兼容新旧两种数据格式）
   if (item.category === 'medicinal') {
     item.medicinal = {
+      alias: data.medicinal?.alias || '',
+      officialName: data.medicinal?.officialName || item.name,
       announcement: data.medicinal?.announcement || data.announcement || '',
-      restriction: data.medicinal?.restriction || data.restriction || '',
+      announcementNo: data.medicinal?.announcementNo || '',
+      announceDate: data.medicinal?.announceDate || '',
+      basis: data.medicinal?.basis || '按照传统既是食品又是中药材的物质目录',
+      isPilot: Boolean(data.medicinal?.isPilot),
+      pilotRegions: data.medicinal?.pilotRegions || '',
+      usageLimit: data.medicinal?.usageLimit || data.restriction || '按传统方式适量食用',
       maxDose: data.medicinal?.maxDose || data.maxDose || '',
       scope: data.medicinal?.scope || data.scope || '',
+      safetyNote: data.medicinal?.safetyNote || '',
     };
   }
 
   return item;
 }
+
+// ============ 读取香辛料数据 ============
+export async function getSpices() {
+  const KV = getKV();
+  const raw = await KV.get(KEY);
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list.map(normalizeSpice) : [];
+  } catch (e) {
+    console.error('[kv] JSON parse error:', e);
+    return [];
+  }
+}
+
+// ============ 写入香辛料数据 ============
+export async function saveSpices(list) {
+  const KV = getKV();
+  if (!Array.isArray(list)) throw new Error('数据必须为数组');
+  if (list.length > MAX_ITEMS) throw new Error(`超出最大限制 ${MAX_ITEMS}`);
+
+  const cleaned = list.map(normalizeSpice);
+  await KV.put(KEY, JSON.stringify(cleaned));
+}
+
+// ============ 导出常量 ============
+export { MAX_ITEMS };
