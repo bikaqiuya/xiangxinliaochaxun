@@ -11,11 +11,21 @@ function injectEnv(context) {
   }
 }
 
+// ============ OPTIONS 预检 ============
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      ...corsHeaders(),
+      'Access-Control-Max-Age': '86400',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
+  });
+}
+
+// ============ GET 校验状态 ============
 export async function onRequestGet(context) {
-  // 1. 注入 Makers 环境变量
   injectEnv(context);
 
-  // 2. 构建响应头：CORS + 严格防缓存
   const headers = {
     ...corsHeaders(),
     'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
@@ -24,24 +34,20 @@ export async function onRequestGet(context) {
   };
 
   try {
-    // 3. 校验登录状态
     const ok = await requireAdmin(context.request);
 
     if (ok) {
-      // 已登录：返回认证状态及用户名
       return json({ 
         authenticated: true,
         username: '管理员'
       }, 200, headers);
     } else {
-      // 未登录或会话无效：返回 401
       return json({ 
         authenticated: false, 
         error: '未登录或会话已过期' 
       }, 401, headers);
     }
   } catch (err) {
-    // 兜底错误处理
     console.error('Auth me error:', err);
     return json({ 
       authenticated: false, 
