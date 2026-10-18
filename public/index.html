@@ -179,6 +179,7 @@
   }
   .badge.spice { background: var(--spice); }
   .badge.medicinal { background: var(--medicinal); }
+  .badge.seasoning { background: #f59e0b; }
 
   .card-body { font-size: 13px; }
   .field { margin-bottom: 6px; }
@@ -297,6 +298,7 @@
     <select id="catFilter">
       <option value="">全部分类</option>
       <option value="spice">香辛料</option>
+      <option value="seasoning">调味品</option>
       <option value="medicinal">药食同源（香辛料/调味品类）</option>
     </select>
   </div>
@@ -336,10 +338,13 @@ async function fetchData() {
 }
 
 function getCatLabel(cat) {
-  return cat === 'medicinal' ? '药食同源' : '香辛料';
+  const map = { spice: '香辛料', seasoning: '调味品', medicinal: '药食同源' };
+  return map[cat] || '香辛料';
 }
 function getCatClass(cat) {
-  return cat === 'medicinal' ? 'medicinal' : 'spice';
+  if (cat === 'medicinal') return 'medicinal';
+  if (cat === 'seasoning') return 'seasoning';
+  return 'spice';
 }
 
 function render() {
@@ -347,13 +352,18 @@ function render() {
   const cat = document.getElementById('catFilter').value;
 
   let filtered = ALL_DATA.filter(item => {
-    if (cat && item.category !== cat) return false;
+    // 分类筛选：spice 选项同时匹配 spice 和 seasoning
+    if (cat) {
+      if (cat === 'spice' && !['spice', 'seasoning'].includes(item.category)) return false;
+      else if (cat !== 'spice' && item.category !== cat) return false;
+    }
+    // 关键词搜索（修正字段名：latin 替代 botanical，notes 替代 note）
     if (kw) {
       const haystack = [
         item.name,
-        item.botanical,
-        item.part,
-        item.note,
+        item.latin || '',
+        item.part || '',
+        item.notes || '',
         item.medicinal?.alias || ''
       ].join(' ').toLowerCase();
       if (!haystack.includes(kw)) return false;
@@ -362,11 +372,11 @@ function render() {
   });
 
   // 统计
-  const spiceCount = ALL_DATA.filter(x => x.category === 'spice').length;
+  const spiceCount = ALL_DATA.filter(x => x.category === 'spice' || x.category === 'seasoning').length;
   const medCount = ALL_DATA.filter(x => x.category === 'medicinal').length;
   document.getElementById('stats').innerHTML = `
     <div class="stat-chip"><strong>${ALL_DATA.length}</strong> 总计</div>
-    <div class="stat-chip"><strong>${spiceCount}</strong> 香辛料</div>
+    <div class="stat-chip"><strong>${spiceCount}</strong> 香辛料/调味品</div>
     <div class="stat-chip"><strong>${medCount}</strong> 药食同源</div>
     <div class="stat-chip"><strong>${filtered.length}</strong> 当前显示</div>
   `;
@@ -383,27 +393,23 @@ function render() {
       const m = item.medicinal || {};
       const isMed = item.category === 'medicinal';
 
-      let stdHtml = '';
-      if (!isMed) {
-        const stdParts = [item.std12729, item.std21725].filter(Boolean);
-        if (stdParts.length) {
-          stdHtml = stdParts.map(s => `<span style="background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:11px;">${s}</span>`).join(' ');
-        }
-      }
+      // 标准字段：始终生成（药食同源品种也能携带香辛料标准）
+      const stdParts = [item.std12729, item.std21725].filter(Boolean);
+      const stdHtml = stdParts.length ? stdParts.map(s => `<span style="background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:11px;">${s}</span>`).join(' ') : '';
 
       return `<div class="card">
         <div class="card-header">
           <div>
             <div class="card-title">${item.name}</div>
-            ${item.botanical ? `<div class="card-sub"><em>${item.botanical}</em></div>` : ''}
+            ${item.latin ? `<div class="card-sub"><em>${item.latin}</em></div>` : ''}
             ${m.alias ? `<div class="card-sub">别名：${m.alias}</div>` : ''}
           </div>
           <span class="badge ${getCatClass(item.category)}">${getCatLabel(item.category)}</span>
         </div>
         <div class="card-body">
           ${item.part ? `<div class="field"><span class="field-label">使用部位：</span><span class="field-value">${item.part}</span></div>` : ''}
-          ${!isMed && stdHtml ? `<div class="field"><span class="field-label">标准：</span> ${stdHtml}</div>` : ''}
-          ${item.note ? `<div class="field"><span class="field-label">备注：</span><span class="field-value">${item.note}</span></div>` : ''}
+          ${stdHtml ? `<div class="field"><span class="field-label">${isMed ? '香辛料标准：' : '标准：'}</span> ${stdHtml}</div>` : ''}
+          ${item.notes ? `<div class="field"><span class="field-label">备注：</span><span class="field-value">${item.notes}</span></div>` : ''}
 
           ${isMed ? `<div class="med-info">
             <div class="field"><span class="field-label">📋 公告依据：</span><span class="field-value">${m.announcement || '-'}</span></div>
