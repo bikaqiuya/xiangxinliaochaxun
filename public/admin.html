@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>香辛料 & 药食同源管理后台</title>
+<style>
+  :root { --primary:#7c3aed; --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,system-ui,"PingFang SC",sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:12px; padding:14px 20px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; flex:1; }
+  .wrap { padding:20px; max-width:1200px; margin:0 auto; }
+  .toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; align-items:center; }
+  select, input, button, textarea { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:14px; }
+  button { cursor:pointer; background:var(--primary); border:none; }
+  button.ghost { background:transparent; border:1px solid var(--line); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; color:#fff; }
+  .badge.warn { background:#ef4444; }
+  .muted { color:var(--muted); }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:flex-start; justify-content:center; padding:40px 12px; overflow:auto; }
+  .modal.show { display:flex; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; width:100%; max-width:640px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .grid label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  .full { grid-column:1 / -1; }
+  pre { background:#0b1220; padding:10px; border-radius:8px; max-height:240px; overflow:auto; }
+  #loginBox { max-width:320px; margin:12vh auto; }
+</style>
+</head>
+<body>
+
+<div id="loginBox" class="wrap">
+  <div class="panel">
+    <h2>后台登录</h2>
+    <label class="full">密码
+      <input type="password" id="pwd" style="width:100%">
+    </label>
+    <div style="margin-top:12px;display:flex;gap:8px;">
+      <button id="btnLogin" style="flex:1">登录</button>
+    </div>
+    <p id="loginMsg" class="muted"></p>
+  </div>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <h1>🌿 香辛料 & 药食同源管理后台</h1>
+    <span id="userState" class="muted"></span>
+    <button class="ghost" id="btnLogout">退出</button>
+  </header>
+
+  <div class="wrap">
+    <div class="toolbar">
+      <select id="filterCat">
+        <option value="">全部分类</option>
+        <option value="spice">香辛料</option>
+        <option value="seasoning">调味品</option>
+        <option value="medicinal">药食同源</option>
+      </select>
+      <input id="kw" placeholder="搜索名称/拉丁名" style="min-width:180px">
+      <button id="btnReload">刷新</button>
+      <button id="btnAdd">+ 新增</button>
+      <button class="ghost" id="btnExport">导出</button>
+      <button class="ghost" id="btnTpl">下载药食模板</button>
+      <button class="ghost" id="btnImport">导入覆盖</button>
+      <input type="file" id="fileInput" accept="application/json" hidden>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>分类</th><th>名称</th><th>拉丁名</th><th>部位</th>
+          <th>公告/标准</th><th>安全提示</th><th>备注</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="modal" id="editModal">
+  <div class="panel">
+    <h3 id="modalTitle">编辑</h3>
+    <div class="grid">
+      <label>分类
+        <select id="f_category">
+          <option value="spice">香辛料</option>
+          <option value="seasoning">调味品</option>
+          <option value="medicinal">药食同源</option>
+        </select>
+      </label>
+      <label>名称（唯一）
+        <input id="f_name">
+      </label>
+      <label class="full">拉丁学名
+        <input id="f_botanical">
+      </label>
+      <label>使用部位
+        <input id="f_part">
+      </label>
+      <label>通用备注
+        <input id="f_note">
+      </label>
+
+      <!-- 香辛料标准 -->
+      <label>GB/T 12729 标准
+        <input id="f_std12729">
+      </label>
+      <label>GB/T 21725 标准
+        <input id="f_std21725">
+      </label>
+
+      <!-- 药食同源字段 -->
+      <div id="medBox" class="full" style="display:none; border-top:1px dashed var(--line); padding-top:10px;">
+        <p class="muted" style="margin:0 0 8px">药食同源信息</p>
+        <div class="grid">
+          <label>别名/药材名 <input id="m_alias"></label>
+          <label>公告名称 <input id="m_officialName"></label>
+          <label class="full">公告依据
+            <select id="m_announcement"></select>
+          </label>
+          <label>公告文号 <input id="m_announcementNo"></label>
+          <label>发布日期 <input id="m_announceDate" type="date"></label>
+          <label class="full">依据文件 <input id="m_basis"></label>
+          <label><input type="checkbox" id="m_isPilot"> 试点管理品种</label>
+          <label class="full">试点区域 <input id="m_pilotRegions"></label>
+          <label class="full">使用限量 <input id="m_usageLimit"></label>
+          <label class="full">安全提示 <input id="m_safetyNote" placeholder="如：孕妇慎用"></label>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="ghost" id="btnCancel">取消</button>
+      <button id="btnSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+const $ = s => document.querySelector(s);
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    ...opts
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  const ct = res.headers.get('content-type') || '';
+  return ct.includes('application/json') ? res.json() : res.text();
+}
+
+// ---------- 登录态 ----------
+async function checkLogin() {
+  try {
+    const me = await api('/auth/me');
+    if (me && me.ok) {
+      $('#loginBox').style.display = 'none';
+      $('#app').style.display = 'block';
+      $('#userState').textContent = '已登录';
+      return true;
+    }
+  } catch {}
+  $('#loginBox').style.display = 'block';
+  $('#app').style.display = 'none';
+  return false;
+}
+
+$('#btnLogin').onclick = async () => {
+  try {
+    const r = await fetch(API + '/auth/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: $('#pwd').value })
+    });
+    if (!r.ok) throw new Error('密码错误');
+    $('#pwd').value = '';
+    await checkLogin();
+    load();
+  } catch (e) {
+    $('#loginMsg').textContent = e.message;
+  }
+};
+
+$('#btnLogout').onclick = async () => {
+  await api('/auth/logout', { method: 'POST' });
+  location.reload();
+};
+
+// ---------- 数据加载 ----------
+let CACHE = [];
+async function load() {
+  CACHE = await api('/spices');
+  render();
+}
+
+function catBadge(c) {
+  const map = { spice: ['香辛料','#8b5cf6'], seasoning: ['调味品','#f59e0b'], medicinal: ['药食同源','#10b981'] };
+  const [label, color] = map[c] || map.spice;
+  return `<span class="badge" style="background:${color}">${label}</span>`;
+}
+
+function render() {
+  const kw = $('#kw').value.trim().toLowerCase();
+  const cat = $('#filterCat').value;
+  const rows = CACHE.filter(x => {
+    if (cat && x.category !== cat) return false;
+    if (kw && !(x.name + x.botanical).toLowerCase().includes(kw)) return false;
+    return true;
+  });
+
+  $('#tbody').innerHTML = rows.map(x => {
+    const m = x.medicinal || {};
+    let stdOrAnn = '';
+    if (x.category === 'medicinal') {
+      stdOrAnn = `${m.announcement || '-'} ${m.isPilot ? '<span class="badge warn">试点</span>' : ''}`;
+    } else {
+      stdOrAnn = [x.std12729, x.std21725].filter(Boolean).join(' / ') || '-';
+    }
+    return `<tr data-cat="${x.category}">
+      <td>${catBadge(x.category)}</td>
+      <td><strong>${x.name}</strong>${m.alias ? `<br><span class="muted">${m.alias}</span>` : ''}</td>
+      <td><span class="muted">${x.botanical || '-'}</span></td>
+      <td>${x.part || '-'}</td>
+      <td>${stdOrAnn}</td>
+      <td>${m.safetyNote ? '⚠️ ' + m.safetyNote : '-'}</td>
+      <td>${x.note || '-'}</td>
+      <td>
+        <button class="ghost" onclick="editItem('${encodeURIComponent(x.name)}')">编辑</button>
+        <button class="ghost" onclick="delItem('${encodeURIComponent(x.name)}')">删</button>
+      </td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="8" class="muted">暂无数据</td></tr>`;
+}
+
+$('#filterCat').onchange = render;
+$('#kw').oninput = render;
+$('#btnReload').onclick = load;
+
+// ---------- 增删改 ----------
+function fillAnnouncementOptions() {
+  const sel = $('#m_announcement');
+  if (sel.options.length) return;
+  const list = [
+    '卫法监发〔2002〕51号（87种原目录）',
+    '2019年第8号公告（当归等6种）',
+    '2023年第9号公告（党参等9种正式纳入）',
+    '2024年第4号公告（地黄等4种）',
+    '按照传统既是食品又是中药材的物质目录（现行版）'
+  ];
+  sel.innerHTML = '<option value="">请选择</option>' + list.map(x => `<option>${x}</option>`).join('');
+}
+
+function openModal(item = null) {
+  fillAnnouncementOptions();
+  const isEdit = !!item;
+  $('#modalTitle').textContent = isEdit ? '编辑：' + item.name : '新增品种';
+  $('#f_category').value = item?.category || 'spice';
+  $('#f_name').value = item?.name || '';
+  $('#f_name').disabled = isEdit;
+  $('#f_botanical').value = item?.botanical || '';
+  $('#f_part').value = item?.part || '';
+  $('#f_note').value = item?.note || '';
+  $('#f_std12729').value = item?.std12729 || '';
+  $('#f_std21725').value = item?.std21725 || '';
+
+  const m = item?.medicinal || {};
+  $('#m_alias').value = m.alias || '';
+  $('#m_officialName').value = m.officialName || '';
+  $('#m_announcement').value = m.announcement || '';
+  $('#m_announcementNo').value = m.announcementNo || '';
+  $('#m_announceDate').value = m.announceDate || '';
+  $('#m_basis').value = m.basis || '';
+  $('#m_isPilot').checked = !!m.isPilot;
+  $('#m_pilotRegions').value = m.pilotRegions || '';
+  $('#m_usageLimit').value = m.usageLimit || '';
+  $('#m_safetyNote').value = m.safetyNote || '';
+
+  toggleMed();
+  $('#editModal').classList.add('show');
+}
+
+function toggleMed() {
+  $('#medBox').style.display = $('#f_category').value === 'medicinal' ? 'block' : 'none';
+}
+$('#f_category').onchange = toggleMed;
+
+$('#btnAdd').onclick = () => openModal(null);
+$('#btnCancel').onclick = () => $('#editModal').classList.remove('show');
+
+async function save() {
+  const payload = {
+    name: $('#f_name').value.trim(),
+    category: $('#f_category').value,
+    botanical: $('#f_botanical').value.trim(),
+    part: $('#f_part').value.trim(),
+    note: $('#f_note').value.trim(),
+    std12729: $('#f_std12729').value.trim(),
+    std21725: $('#f_std21725').value.trim(),
+    medicinal: {
+      alias: $('#m_alias').value.trim(),
+      officialName: $('#m_officialName').value.trim(),
+      announcement: $('#m_announcement').value.trim(),
+      announcementNo: $('#m_announcementNo').value.trim(),
+      announceDate: $('#m_announceDate').value.trim(),
+      basis: $('#m_basis').value.trim(),
+      isPilot: $('#m_isPilot').checked,
+      pilotRegions: $('#m_pilotRegions').value.trim(),
+      usageLimit: $('#m_usageLimit').value.trim(),
+      safetyNote: $('#m_safetyNote').value.trim()
+    }
+  };
+  if (!payload.name) return alert('名称必填');
+
+  try {
+    // 判断已存在则 PUT，否则 POST
+    const exists = CACHE.some(x => x.name === payload.name);
+    if (exists) await api('/spices', { method: 'PUT', body: JSON.stringify(payload) });
+    else await api('/spices', { method: 'POST', body: JSON.stringify(payload) });
+    $('#editModal').classList.remove('show');
+    await load();
+  } catch (e) { alert('保存失败：' + e.message); }
+}
+$('#btnSave').onclick = save;
+
+window.editItem = async (name) => {
+  name = decodeURIComponent(name);
+  const item = CACHE.find(x => x.name === name);
+  if (item) openModal(item);
+};
+window.delItem = async (name) => {
+  name = decodeURIComponent(name);
+  if (!confirm(`确认删除「${name}」？`)) return;
+  try {
+    await api('/spices?name=' + encodeURIComponent(name), { method: 'DELETE' });
+    await load();
+  } catch (e) { alert('删除失败：' + e.message); }
+};
+
+// ---------- 导入导出 ----------
+$('#btnExport').onclick = () => {
+  window.location.href = API + '/spices/export?download=1';
+};
+$('#btnTpl').onclick = () => {
+  window.location.href = API + '/spices/export?template=medicinal';
+};
+$('#btnImport').onclick = () => $('#fileInput').click();
+$('#fileInput').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const arr = JSON.parse(text);
+    const r = await api('/spices/import', { method: 'POST', body: JSON.stringify(arr) });
+    alert(r.message || '导入完成');
+    await load();
+  } catch (err) {
+    alert('导入失败：' + err.message);
+  }
+  e.target.value = '';
+};
+
+// 启动
+(async () => {
+  const ok = await checkLogin();
+  if (ok) load();
+})();
+</script>
+</body>
+</html>
